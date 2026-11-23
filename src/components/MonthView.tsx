@@ -1,6 +1,7 @@
 import { HOURS, addDays, bestRanges, dateKey, freeCount, freeRanges, hh, sameDay, startOfWeek, type Cell, type Member } from '../lib/schedule';
 
 const HEAD = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'];
+const SHORT = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
 type Props = { month: Date; members: Member[]; cells: Record<string, Cell>; onPick: (d: Date) => void };
 
@@ -14,15 +15,16 @@ export function MonthView({ month, members, cells, onPick }: Props) {
   const today = new Date();
 
   return (
-    <div className="flex h-full flex-col overflow-auto p-3">
+    <div className="flex h-full flex-col overflow-auto p-1.5 sm:p-3">
       <div className="grid grid-cols-7 gap-px pb-2">
-        {HEAD.map((h) => (
-          <div key={h} className="px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500">
-            {h}
+        {HEAD.map((h, i) => (
+          <div key={h} className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 sm:px-2">
+            <span className="sm:hidden">{SHORT[i]}</span>
+            <span className="hidden sm:inline">{h}</span>
           </div>
         ))}
       </div>
-      <div className="grid flex-1 grid-cols-7 gap-1.5" style={{ gridAutoRows: 'minmax(112px, 1fr)' }}>
+      <div key={dateKey(first)} className="animate-fade-in grid flex-1 grid-cols-7 gap-1 [grid-auto-rows:minmax(76px,1fr)] sm:gap-1.5 sm:[grid-auto-rows:minmax(112px,1fr)]">
         {days.map((d) => {
           const k = dateKey(d);
           const hours = HOURS.map((h) => freeCount(members, cells, k, h));
@@ -36,20 +38,20 @@ export function MonthView({ month, members, cells, onPick }: Props) {
               type="button"
               onClick={() => onPick(d)}
               aria-label={`${d.getDate()}/${d.getMonth() + 1}: nhiều nhất ${max}/${N} người rảnh. Mở tuần này`}
-              className={`group flex flex-col rounded-lg border p-2.5 text-left transition hover:-translate-y-0.5 hover:border-stone-400 hover:shadow-[0_8px_20px_-14px_rgba(28,25,23,0.5)] active:translate-y-0 ${
+              className={`group flex min-w-0 flex-col rounded-lg border p-1 text-left sm:p-2.5 transition hover:-translate-y-0.5 hover:border-stone-400 hover:shadow-[0_8px_20px_-14px_rgba(28,25,23,0.5)] active:translate-y-0 ${
                 inMonth ? 'border-stone-200 bg-white' : 'border-transparent bg-stone-100/60 opacity-60'
               } ${isToday ? 'ring-2 ring-stone-900 ring-offset-1 ring-offset-paper' : ''}`}
             >
-              <div className="flex items-baseline justify-between">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-1">
                 <span className={`text-[15px] font-semibold tabular-nums ${inMonth ? 'text-stone-900' : 'text-stone-500'}`}>{d.getDate()}</span>
                 {max > 0 && (
-                  <span className="rounded-full bg-emerald-50 px-1.5 text-[11px] font-semibold tabular-nums text-emerald-700">
+                  <span className="rounded-full bg-emerald-50 px-1 text-[10px] sm:px-1.5 sm:text-[11px] font-semibold tabular-nums text-emerald-700">
                     {max}/{N}
                   </span>
                 )}
               </div>
               <div className="mt-auto">
-                <div className="mb-1.5 h-4 truncate text-[11px] text-stone-500">{best ? `${hh(best.from)}–${hh(best.to)}` : ''}</div>
+                <div className="mb-1.5 hidden h-4 truncate text-[11px] text-stone-500 sm:block">{best ? `${hh(best.from)}–${hh(best.to)}` : ''}</div>
                 <div className="flex h-5 items-end gap-px" aria-hidden>
                   {hours.map((c, i) => (
                     <span

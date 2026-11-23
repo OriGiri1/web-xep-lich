@@ -3,6 +3,28 @@
 @theme {
   --font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
   --color-paper: #f7f6f2;
+
+  --animate-pop-in: pop-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-fade-in: fade-in 220ms ease-out;
+  --animate-rise-in: rise-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(-4px);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
 }
 
 html,
@@ -29,5 +51,25 @@ body {
   *::after {
     transition-duration: 0s !important;
     animation-duration: 0s !important;
+  }
+}
+
+/* WeekGrid column widths; sticky offsets are computed from these. */
+:root {
+  --w-day: 56px;
+  --w-period: 22px;
+  --w-time: 52px;
+  --w-member: 84px;
+  --w-add: 54px;
+  --w-free: 48px;
+}
+@media (min-width: 640px) {
+  :root {
+    --w-day: 92px;
+    --w-period: 30px;
+    --w-time: 98px;
+    --w-member: 112px;
+    --w-add: 48px;
+    --w-free: 72px;
   }
 }

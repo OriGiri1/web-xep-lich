@@ -5,7 +5,7 @@ import type { ScheduleStore } from '../services/scheduleStore';
 import { CellPopover, type Pop } from './CellPopover';
 import { InlineEdit } from './InlineEdit';
 
-const W = { day: 92, period: 30, time: 98, member: 112, add: 48, free: 72 };
+// Column widths live in index.css (--w-*) so they can shrink on phones.
 const PER_DAY = HOURS.length;
 
 const TONE: Record<Cell['s'], string> = {
@@ -32,6 +32,7 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
   const scroller = useRef<HTMLDivElement>(null);
   const head = useRef<HTMLTableSectionElement>(null);
   const drag = useRef<{ member: string; start: number; end: number; moved: boolean } | null>(null);
+  const ptr = useRef<number | null>(null); // last pointer clientY during a drag, read by the auto-scroll loop
   const [sel, setSel] = useState<{ member: string; a: number; b: number } | null>(null);
   const [pop, setPop] = useState<Pop | null>(null);
   const [newMember, setNewMember] = useState<string | null>(null);
@@ -66,32 +67,87 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
     } else store.setCells([k], null);
   };
 
+  // Grid body in viewport coords: below the sticky header, above the scrollbar, clipped to the window.
+  const bounds = () => {
+    const el = scroller.current!;
+    const r = el.getBoundingClientRect();
+    return { top: Math.max(r.top + (head.current?.offsetHeight ?? 0), 0), bottom: Math.min(r.top + el.clientHeight, innerHeight) };
+  };
+
+  // Moves the drag end to the row at height y, clamped to the visible grid. Selections may span days.
+  const track = (y: number) => {
+    const d = drag.current;
+    const cell = document.querySelector(`[data-cell="${d?.member}:${d?.start}"]`);
+    if (!d || !cell) return;
+    const c = cell.getBoundingClientRect();
+    const b = bounds();
+    // Probe in the drag's own column: the sticky day/period cells span many rows and would report the wrong one.
+    const tr = document.elementFromPoint(c.left + c.width / 2, Math.min(Math.max(y, b.top + 1), b.bottom - 1))?.closest<HTMLElement>('tr[data-row]');
+    if (!tr) return;
+    const r = Number(tr.dataset.row);
+    if (r === d.end) return;
+    d.end = r;
+    d.moved = true;
+    setSel({ member: d.member, a: d.start, b: r });
+  };
+
+  // While dragging near (or past) the top/bottom edge, scroll the grid at a capped, readable speed.
+  const autoScroll = () => {
+    let last = performance.now();
+    let acc = 0;
+    const own = drag.current; // the loop ends with its own drag, so a fast re-drag never runs two loops
+    const tick = (now: number) => {
+      const d = drag.current;
+      const el = scroller.current;
+      if (!d || d !== own || !el) return;
+      const dt = Math.min(now - last, 50) / 1000;
+      last = now;
+      const y = ptr.current;
+      if (y !== null) {
+        const b = bounds();
+        const EDGE = 40;
+        const into = y < b.top + EDGE ? y - (b.top + EDGE) : y > b.bottom - EDGE ? y - (b.bottom - EDGE) : 0;
+        const speed = Math.sign(into) * Math.min(Math.abs(into) * 5, 260); // px/s, ~8 rows/s at most
+        acc += speed * dt;
+        const step = Math.trunc(acc);
+        if (step) {
+          acc -= step;
+          const before = el.scrollTop;
+          el.scrollTop += step;
+          if (el.scrollTop === before) scrollBy(0, step); // grid at its end (or not scrollable, e.g. day view): move the page
+
+          track(y);
+        }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  };
+
   const onCellDown = (e: RPointerEvent, member: string, row: number) => {
     if (e.button !== 0) return;
     e.preventDefault(); // no text selection, no focus jump
     setPop(null);
     drag.current = { member, start: row, end: row, moved: false };
+    ptr.current = e.clientY;
     setSel({ member, a: row, b: row });
+    if (e.pointerType === 'mouse' || e.pointerType === 'pen') autoScroll(); // touch drags pan the grid natively
   };
 
   // Re-bound every render so the handlers see current cells.
   useEffect(() => {
     // Only the row under the pointer matters; the column stays the one the drag started in.
     const move = (e: PointerEvent) => {
-      const d = drag.current;
-      if (!d) return;
-      const tr = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>('tr[data-row]');
-      if (!tr) return;
-      const r = Number(tr.dataset.row);
-      if (r === d.end) return;
-      d.end = r;
-      d.moved = true;
-      setSel({ member: d.member, a: d.start, b: r });
+      // Chrome fires synthetic zero-movement moves when content scrolls under the pointer, with a stale y.
+      if (!drag.current || (e.movementX === 0 && e.movementY === 0)) return;
+      ptr.current = e.clientY;
+      track(e.clientY);
     };
     const up = () => {
       const d = drag.current;
       if (!d) return;
       drag.current = null;
+      ptr.current = null;
       if (!d.moved) {
         setSel(null);
         cycle(d.member, d.start);
@@ -106,6 +162,7 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
     };
     const cancel = () => {
       drag.current = null;
+      ptr.current = null;
       setSel(null);
     };
     window.addEventListener('pointermove', move);
@@ -136,45 +193,45 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
     return `${name} · ${span}${p.rows.length > 1 ? ` · ${p.rows.length} khung giờ` : ''}`;
   };
 
-  const th = 'sticky top-0 h-11 border-b border-stone-200 bg-stone-50 px-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500';
+  const th = 'sticky top-0 h-12 sm:h-11 border-b border-stone-200 bg-stone-50 px-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500';
   const selLo = sel ? Math.min(sel.a, sel.b) : -1;
   const selHi = sel ? Math.max(sel.a, sel.b) : -1;
 
   return (
-    <div ref={scroller} onScroll={() => pop && closePop()} className="relative h-full overflow-auto overscroll-contain select-none">
+    <div ref={scroller} className="relative h-full overflow-auto select-none">
       <table className="w-max min-w-full border-separate border-spacing-0 text-[13px]">
         <thead ref={head}>
           <tr>
-            <th scope="col" style={{ left: 0, width: W.day, minWidth: W.day }} className={`${th} z-40`}>
+            <th scope="col" style={{ left: 0, width: 'var(--w-day)', minWidth: 'var(--w-day)' }} className={`${th} z-40`}>
               Ngày
             </th>
-            <th scope="col" colSpan={2} style={{ left: W.day, minWidth: W.period + W.time }} className={`${th} z-40 border-r`}>
+            <th scope="col" colSpan={2} style={{ left: 'var(--w-day)', minWidth: 'calc(var(--w-period) + var(--w-time))' }} className={`${th} z-40 border-r`}>
               Khung giờ
             </th>
             {members.map((m) => (
-              <th key={m.id} scope="col" style={{ minWidth: W.member }} className={`${th} z-30 border-l border-l-stone-100 normal-case tracking-normal`}>
+              <th key={m.id} scope="col" style={{ minWidth: 'var(--w-member)' }} className={`${th} z-30 border-l border-l-stone-100 normal-case tracking-normal`}>
                 <InlineEdit
                   value={m.name}
                   label="Tên thành viên"
                   startEditing={m.id === newMember}
                   onSave={(v) => store.renameMember(m.id, v)}
-                  className="block w-full px-1.5 py-1 text-[13px] font-semibold text-stone-800"
-                  inputClassName="w-full px-1.5 py-1 text-[13px] font-semibold text-stone-900"
+                  className="block w-full px-1.5 py-1 text-[13px] font-semibold text-stone-800 min-h-11 sm:min-h-0"
+                  inputClassName="w-full px-1.5 py-1 text-[16px] font-semibold text-stone-900 min-h-11 sm:min-h-0 sm:text-[13px]"
                 />
               </th>
             ))}
-            <th scope="col" style={{ width: W.add, minWidth: W.add }} className={`${th} z-30 border-l border-l-stone-100 px-1`}>
+            <th scope="col" style={{ width: 'var(--w-add)', minWidth: 'var(--w-add)' }} className={`${th} z-30 border-l border-l-stone-100 px-1`}>
               <button
                 type="button"
                 aria-label="Thêm người"
                 title="Thêm người"
                 onClick={() => setNewMember(store.addMember(`Người ${N + 1}`))}
-                className="grid size-8 place-items-center rounded-lg border border-dashed border-stone-300 text-stone-500 transition hover:border-stone-900 hover:bg-white hover:text-stone-900 active:translate-y-px"
+                className="grid size-11 place-items-center sm:size-8 rounded-lg border border-dashed border-stone-300 text-stone-500 transition hover:border-stone-900 hover:bg-white hover:text-stone-900 active:translate-y-px"
               >
                 <Plus size={15} aria-hidden />
               </button>
             </th>
-            <th scope="col" style={{ right: 0, width: W.free, minWidth: W.free }} className={`${th} z-40 border-l text-center`}>
+            <th scope="col" style={{ right: 0, width: 'var(--w-free)', minWidth: 'var(--w-free)' }} className={`${th} z-40 border-l text-center`}>
               Rảnh
             </th>
           </tr>
@@ -191,23 +248,23 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
               <tr key={r.row} data-row={r.row} data-day={r.hi === 0 ? r.key : undefined} className="group">
                 {r.hi === 0 && (
                   <td rowSpan={PER_DAY} style={{ left: 0 }} className={`sticky z-20 border-t-2 border-t-stone-300 bg-white align-top ${isToday ? 'bg-amber-50/70' : ''}`}>
-                    <div className="sticky top-11 px-3 py-2.5">
+                    <div className="sticky top-12 sm:top-11 px-1.5 py-2.5 sm:px-3">
                       <div className="text-[13px] font-semibold text-stone-900">{dayName(r.d)}</div>
                       <div className="text-[12px] text-stone-500">{dm(r.d)}</div>
-                      {isToday && <div className="mt-1.5 inline-block rounded-full bg-stone-900 px-1.5 py-px text-[10px] font-semibold text-white">Hôm nay</div>}
+                      {isToday && <div className="mt-1.5 inline-block rounded-full bg-stone-900 px-1 py-px text-[9px] whitespace-nowrap sm:px-1.5 sm:text-[10px] font-semibold text-white">Hôm nay</div>}
                     </div>
                   </td>
                 )}
                 {period && (
-                  <td rowSpan={period.to - period.from} style={{ left: W.day, width: W.period }} className={`sticky z-20 border-l border-l-stone-100 bg-stone-50 align-top ${line}`}>
-                    <div className="sticky top-11 flex justify-center py-2">
+                  <td rowSpan={period.to - period.from} style={{ left: 'var(--w-day)', width: 'var(--w-period)' }} className={`sticky z-20 border-l border-l-stone-100 bg-stone-50 align-top ${line}`}>
+                    <div className="sticky top-12 sm:top-11 flex justify-center py-2">
                       <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500 [writing-mode:vertical-rl] rotate-180">{period.name}</span>
                     </div>
                   </td>
                 )}
-                <td style={{ left: W.day + W.period, width: W.time }} className={`sticky z-20 border-r border-r-stone-200 bg-white px-2.5 whitespace-nowrap group-hover:bg-stone-50 ${line}`}>
+                <td style={{ left: 'calc(var(--w-day) + var(--w-period))', width: 'var(--w-time)' }} className={`sticky z-20 border-r border-r-stone-200 bg-white px-1.5 whitespace-nowrap sm:px-2.5 group-hover:bg-stone-50 ${line}`}>
                   <span className="font-medium text-stone-800">{hh(r.h)}</span>
-                  <span className="text-stone-400">–{hh(r.h + 1)}</span>
+                  <span className="hidden text-stone-400 sm:inline">–{hh(r.h + 1)}</span>
                 </td>
                 {members.map((m) => {
                   const c = cells[keyOf(m.id, r.row)];
@@ -220,7 +277,7 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
                         aria-label={`${m.name}, ${dayName(r.d)} ${dm(r.d)}, ${hh(r.h)}–${hh(r.h + 1)}: ${status}`}
                         title={c?.s === 'reason' ? c.r : undefined}
                         onClick={(e) => e.detail === 0 && cycle(m.id, r.row)}
-                        className={`flex h-6 w-full items-center rounded-[5px] px-1.5 text-[11px] font-medium transition-colors ${
+                        className={`flex h-11 w-full items-center rounded-[5px] px-1.5 text-[12px] sm:h-6 sm:text-[11px] font-medium transition-colors ${
                           c ? TONE[c.s] : 'text-transparent hover:bg-stone-100'
                         } ${selected ? 'outline-2 -outline-offset-1 outline-stone-900' : ''} ${selected && !c ? 'bg-stone-200/70' : ''}`}
                       >
@@ -233,7 +290,7 @@ export function WeekGrid({ days, members, cells, store, focusDay, onFocused }: P
                           title="Sửa lí do"
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => openPop(m.id, [r.row], 'reason', c.r ?? '')}
-                          className="absolute top-1/2 right-1 grid size-5 -translate-y-1/2 place-items-center rounded text-sky-700 opacity-50 transition hover:bg-sky-200 hover:opacity-100 focus-visible:opacity-100 group-hover/cell:opacity-100"
+                          className="absolute top-1/2 right-0.5 grid size-11 -translate-y-1/2 sm:right-1 sm:size-5 place-items-center rounded text-sky-700 opacity-50 transition hover:bg-sky-200 hover:opacity-100 focus-visible:opacity-100 group-hover/cell:opacity-100"
                         >
                           <Pencil size={11} aria-hidden />
                         </button>
