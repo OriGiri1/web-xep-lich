@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /boards/{boardId} {
+      allow read: if true;
+      allow write: if request.resource.data.keys().hasOnly(['title', 'members'])
+                   && (!('title' in request.resource.data) || (request.resource.data.title is string && request.resource.data.title.size() <= 80));
+
+      match /cells/{cellId} {
+        allow read: if true;
+        allow delete: if true;
+        allow create, update: if request.resource.data.keys().hasOnly(['s', 'r'])
+                              && request.resource.data.s in ['free', 'busy', 'reason']
+                              && (!('r' in request.resource.data) || (request.resource.data.r is string && request.resource.data.r.size() <= 80));
+      }
+    }
+  }
+}
